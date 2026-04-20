@@ -776,6 +776,16 @@ def download_ewd_v2(driver, ewd, output_dir, cache_root):
                 if os.path.exists(cache_path):
                     continue
                 driver.get(svgz_url)
+
+                # dismiss any JS alert that TIS fires on direct SVGZ navigation
+                try:
+                    from selenium.webdriver.support.ui import WebDriverWait
+                    from selenium.webdriver.support import expected_conditions as EC
+                    WebDriverWait(driver, 3).until(EC.alert_is_present())
+                    driver.switch_to.alert.dismiss()
+                except Exception:
+                    pass  # no alert, that's fine
+
                 assert_not_login_page(driver, "fetching SVGZ " + svgz_url)
                 assert_not_http_error_page(driver, "fetching SVGZ " + svgz_url)
                 # SVGZ is downloaded via Chrome's download behavior
