@@ -932,9 +932,7 @@ def flat_artifact_path(output_root, href, extension):
 
 def pdf_output_path(output_root, breadcrumb, href):
     pdf_root = os.path.join(output_root, "pdf")
-    if not breadcrumb:
-        return flat_artifact_path(pdf_root, href, "pdf")
-    return breadcrumb_artifact_path(breadcrumb, pdf_root, "pdf")
+    return flat_artifact_path(pdf_root, href, "pdf")
 
 
 def html_output_path(output_root, breadcrumb, href):
