@@ -671,7 +671,7 @@ def resolve_filter_selection(cache_root, doc_id, root, override_selection=None, 
     return selection
 
 
-def download_ewd(driver, ewd, output_dir, cache_root):
+def download_ewd_v1(driver, ewd, output_dir, cache_root):
     SYSTEMS = ["system", "routing", "overall"]
     download_dir = cache_download_dir(cache_root)
 
@@ -714,6 +714,96 @@ def download_ewd(driver, ewd, output_dir, cache_root):
                 continue
             shutil.move(dl_path, fn)
             print("Done ", name)
+
+def download_ewd_v2(driver, ewd, output_dir, cache_root):
+    """Handle newer EWD format with TitleList/System/division structure and SVGZ files."""
+    SECTIONS = ["system", "routing"]
+    base_url = "https://techinfo.toyota.com/t3Portal/external/en/ewdappu/" + ewd + "/ewd/contents/"
+
+    for section in SECTIONS:
+        title_url = base_url + section + "/title.xml"
+        cache_dir = cache_ewd_system_dir(cache_root, ewd, section)
+        os.makedirs(cache_dir, exist_ok=True)
+        title_cache = os.path.join(cache_dir, "title.xml")
+
+        if not os.path.exists(title_cache):
+            print("Fetching", title_url)
+            xml_src = fetch_xml_document(driver, title_url)
+            xml_src = xml_src.replace('\xa0', ' ')
+            with open(title_cache, 'w', encoding='utf-8') as fh:
+                fh.write(xml_src)
+
+        tree = parse_xml_file(title_cache)
+        root = tree.getroot()
+
+        # collect unique fig names to avoid re-downloading shared figures
+        seen_figs = set()
+
+        for system in root.findall("System"):
+            name_el = system.find("name")
+            name = name_el.text.strip() if name_el is not None and name_el.text else "Unknown"
+            fig_el = system.find("fig")
+            if fig_el is None or not fig_el.text:
+                continue
+            fig = fig_el.text.strip()
+
+            if fig in seen_figs:
+                continue
+            seen_figs.add(fig)
+
+            output_section_dir = output_ewd_system_dir(output_dir, ewd, section)
+            os.makedirs(output_section_dir, exist_ok=True)
+
+            # collect all division filenames for this fig
+            divisions = [d.text.strip() for d in system.findall("division") if d.text]
+
+            if not divisions:
+                continue
+
+            # check if we already have all divisions cached
+            all_cached = all(
+                os.path.exists(os.path.join(cache_dir, d + ".svgz"))
+                for d in divisions
+            )
+            if all_cached:
+                print("Already cached:", fig)
+                continue
+
+            print("Downloading", fig, "(", len(divisions), "divisions)...")
+            for div in divisions:
+                svgz_url = base_url + section + "/fig/" + div + ".svgz"
+                cache_path = os.path.join(cache_dir, div + ".svgz")
+                if os.path.exists(cache_path):
+                    continue
+                driver.get(svgz_url)
+                assert_not_login_page(driver, "fetching SVGZ " + svgz_url)
+                assert_not_http_error_page(driver, "fetching SVGZ " + svgz_url)
+                # SVGZ is downloaded via Chrome's download behavior
+                dl_path = wait_for_download(cache_download_dir(cache_root), div + ".svgz")
+                if dl_path is None:
+                    print("  Failed to download", div)
+                    continue
+                shutil.move(dl_path, cache_path)
+                print("  Downloaded", div)
+
+
+def is_new_ewd_format(driver, ewd):
+    """Detect whether this EWD uses the new TitleList format."""
+    url = "https://techinfo.toyota.com/t3Portal/external/en/ewdappu/" + ewd + "/ewd/contents/system/title.xml"
+    try:
+        driver.get(url)
+        xml_src = get_xml_viewer_source(driver)
+        return "<TitleList" in xml_src
+    except Exception:
+        return False
+
+def download_ewd(driver, ewd, output_dir, cache_root):
+    if is_new_ewd_format(driver, ewd):
+        print("Detected new EWD format for", ewd)
+        download_ewd_v2(driver, ewd, output_dir, cache_root)
+    else:
+        # original code here (renamed to download_ewd_v1)
+        download_ewd_v1(driver, ewd, output_dir, cache_root)
 
 def toc_parse_items(cache_root, output_root, doc_id, items, ancestors=None, filter_spec=None, inherited_metadata=None):
     if ancestors is None:
