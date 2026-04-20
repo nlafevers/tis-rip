@@ -670,6 +670,22 @@ def resolve_filter_selection(cache_root, doc_id, root, override_selection=None, 
     save_selection(cache_root, doc_id, selection)
     return selection
 
+def fetch_svgz_with_session(driver, url, dest_path):
+    """Download a binary file using the browser's current session cookies."""
+    import requests
+    cookies = {c['name']: c['value'] for c in driver.get_cookies()}
+    headers = {
+        'User-Agent': driver.execute_script("return navigator.userAgent"),
+        'Referer': 'https://techinfo.toyota.com/',
+    }
+    response = requests.get(url, cookies=cookies, headers=headers, stream=True)
+    if response.status_code != 200:
+        return False
+    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+    with open(dest_path, 'wb') as fh:
+        for chunk in response.iter_content(chunk_size=8192):
+            fh.write(chunk)
+    return True
 
 def download_ewd_v1(driver, ewd, output_dir, cache_root):
     SYSTEMS = ["system", "routing", "overall"]
@@ -769,32 +785,17 @@ def download_ewd_v2(driver, ewd, output_dir, cache_root):
                 print("Already cached:", fig)
                 continue
 
-            print("Downloading", fig, "(", len(divisions), "divisions)...")
             for div in divisions:
                 svgz_url = base_url + section + "/fig/" + div + ".svgz"
                 cache_path = os.path.join(cache_dir, div + ".svgz")
                 if os.path.exists(cache_path):
                     continue
-                driver.get(svgz_url)
-
-                # dismiss any JS alert that TIS fires on direct SVGZ navigation
-                try:
-                    from selenium.webdriver.support.ui import WebDriverWait
-                    from selenium.webdriver.support import expected_conditions as EC
-                    WebDriverWait(driver, 3).until(EC.alert_is_present())
-                    driver.switch_to.alert.dismiss()
-                except Exception:
-                    pass  # no alert, that's fine
-
-                assert_not_login_page(driver, "fetching SVGZ " + svgz_url)
-                assert_not_http_error_page(driver, "fetching SVGZ " + svgz_url)
-                # SVGZ is downloaded via Chrome's download behavior
-                dl_path = wait_for_download(cache_download_dir(cache_root), div + ".svgz")
-                if dl_path is None:
+                print("  Downloading", div, "...")
+                success = fetch_svgz_with_session(driver, svgz_url, cache_path)
+                if not success:
                     print("  Failed to download", div)
                     continue
-                shutil.move(dl_path, cache_path)
-                print("  Downloaded", div)
+                print("  Done", div)
 
 
 def is_new_ewd_format(driver, ewd):
